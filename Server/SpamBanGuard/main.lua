@@ -1,39 +1,54 @@
-local CONFIG = {
-    -- Messages allowed inside WINDOW_SECONDS before a player is considered spamming.
-    MAX_MESSAGES_IN_WINDOW = 6,
-    WINDOW_SECONDS = 10,
+---@class SpamBanGuardConfig
+---@field maxMessagesInWindow integer Messages allowed inside windowSeconds before a player is considered spamming.
+---@field windowSeconds integer
+---@field maxRepeatCount integer Same normalized message repeated this many times inside repeatWindowSeconds triggers a ban.
+---@field repeatWindowSeconds integer
+---@field banFile string File where persistent banned identifiers are stored (one key per line).
+---@field banReason string Message shown when a player is blocked/kicked for spam.
 
-    -- Same (normalized) message repeated this many times inside REPEAT_WINDOW_SECONDS triggers a ban.
-    MAX_REPEAT_COUNT = 3,
-    REPEAT_WINDOW_SECONDS = 20,
+---@class PlayerChatState
+---@field timestamps integer[]
+---@field repeats table<string, integer[]>
 
-    -- File where persistent banned identifiers are stored (one key per line).
-    BAN_FILE = "banned_ids.txt",
+---@class SpamBanGuardState
+---@field banned table<string, boolean> key -> true
+---@field chat table<integer, PlayerChatState> playerId -> PlayerChatState
 
-    -- Message shown when a player is blocked/kicked for spam.
-    BAN_REASON = "Banned: chat spam detected",
+---@type SpamBanGuardConfig
+local config = {
+    maxMessagesInWindow = 6,
+    windowSeconds = 10,
+    maxRepeatCount = 3,
+    repeatWindowSeconds = 20,
+    banFile = "banned_ids.txt",
+    banReason = "Banned: chat spam detected",
 }
 
+---@type SpamBanGuardState
 local state = {
-    -- key -> true
     banned = {},
-    -- player_id -> { timestamps = { ... }, repeats = { [normalized_msg] = { ... } } }
-    chat = {}
+    chat = {},
 }
 
+---@return integer
 local function now()
     return os.time()
 end
 
-local function trim(s)
-    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+---@param value string
+---@return string
+local function trim(value)
+    return (value:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
-local function normalize_message(msg)
-    return tostring(msg or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+---@param message unknown
+---@return string
+local function normalizeMessage(message)
+    return tostring(message or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 end
 
-local function get_plugin_dir()
+---@return string
+local function getPluginDir()
     -- The file lives in the plugin root, so this works from BeamMP server working directory.
     local info = debug.getinfo(1, "S")
     local source = info and info.source or ""
@@ -48,21 +63,26 @@ local function get_plugin_dir()
     return "."
 end
 
-local _ban_file_path
+---@type string|nil
+local banFilePathCache
 
-local function ban_file_path()
-    if _ban_file_path then return _ban_file_path end
-    local dir = get_plugin_dir()
-    if FS and FS.ConcatPaths then
-        _ban_file_path = FS.ConcatPaths(dir, CONFIG.BAN_FILE)
-    else
-        _ban_file_path = dir .. "/" .. CONFIG.BAN_FILE
+---@return string
+local function getBanFilePath()
+    if banFilePathCache then
+        return banFilePathCache
     end
-    return _ban_file_path
+
+    local dir = getPluginDir()
+    if FS and FS.ConcatPaths then
+        banFilePathCache = FS.ConcatPaths(dir, config.banFile)
+    else
+        banFilePathCache = dir .. "/" .. config.banFile
+    end
+    return banFilePathCache
 end
 
-local function load_bans()
-    local path = ban_file_path()
+local function loadBans()
+    local path = getBanFilePath()
     local file = io.open(path, "r")
     if not file then
         print("[SpamBanGuard] No existing ban file found at " .. path .. " (will create on first ban)")
@@ -82,8 +102,9 @@ local function load_bans()
     print("[SpamBanGuard] Loaded " .. count .. " banned identifier(s)")
 end
 
-local function save_bans()
-    local path = ban_file_path()
+---@return boolean
+local function saveBans()
+    local path = getBanFilePath()
     local file, err = io.open(path, "w")
     if not file then
         print("[SpamBanGuard] Failed to save bans: " .. tostring(err))
@@ -98,8 +119,10 @@ local function save_bans()
     return true
 end
 
-local function append_ban(key)
-    local path = ban_file_path()
+---@param key string
+---@return boolean
+local function appendBan(key)
+    local path = getBanFilePath()
     local file, err = io.open(path, "a")
     if not file then
         print("[SpamBanGuard] Failed to append ban: " .. tostring(err))
@@ -110,7 +133,9 @@ local function append_ban(key)
     return true
 end
 
-local function key_from_identifiers(identifiers)
+---@param identifiers table|nil
+---@return string|nil
+local function keyFromIdentifiers(identifiers)
     if type(identifiers) ~= "table" then
         return nil
     end
@@ -126,30 +151,44 @@ local function key_from_identifiers(identifiers)
     return nil
 end
 
-local function is_banned_identifiers(identifiers)
-    local key = key_from_identifiers(identifiers)
+---@param identifiers table|nil
+---@return boolean
+local function isBannedIdentifiers(identifiers)
+    local key = keyFromIdentifiers(identifiers)
     if not key then
         return false
     end
     return state.banned[key] == true
 end
 
-local function add_ban_for_player(player_id)
-    local identifiers = MP.GetPlayerIdentifiers(player_id)
-    local key = key_from_identifiers(identifiers)
+---@param playerId integer
+---@return boolean
+local function addBanForPlayer(playerId)
+    local identifiers = MP.GetPlayerIdentifiers(playerId)
+    local key = keyFromIdentifiers(identifiers)
     if not key then
-        print("[SpamBanGuard] Could not resolve identifiers for player_id=" .. tostring(player_id))
+        print("[SpamBanGuard] Could not resolve identifiers for playerId=" .. tostring(playerId))
         return false
     end
 
     state.banned[key] = true
-    if append_ban(key) then
+    if appendBan(key) then
         print("[SpamBanGuard] Added ban: " .. key)
+        return true
     end
-    return true
+
+    -- Fallback: ensure bans still persist if append fails, while keeping behavior deterministic.
+    if saveBans() then
+        print("[SpamBanGuard] Added ban after full save fallback: " .. key)
+        return true
+    end
+    return false
 end
 
-local function prune_old_timestamps(timestamps, cutoff)
+---@param timestamps integer[]
+---@param cutoff integer
+---@return integer[]
+local function pruneOldTimestamps(timestamps, cutoff)
     local write = 0
     for read = 1, #timestamps do
         if timestamps[read] >= cutoff then
@@ -163,74 +202,94 @@ local function prune_old_timestamps(timestamps, cutoff)
     return timestamps
 end
 
-local function ensure_player_chat_state(player_id)
-    if not state.chat[player_id] then
-        state.chat[player_id] = {
+---@param playerId integer
+---@return PlayerChatState
+local function ensurePlayerChatState(playerId)
+    if not state.chat[playerId] then
+        state.chat[playerId] = {
             timestamps = {},
-            repeats = {}
+            repeats = {},
         }
     end
-    return state.chat[player_id]
+    return state.chat[playerId]
 end
 
-local function handle_spam_ban(player_id, player_name, trigger)
-    local banned = add_ban_for_player(player_id)
+---@param playerId integer
+---@param playerName string
+---@param trigger string
+---@return integer
+local function handleSpamBan(playerId, playerName, trigger)
+    local banned = addBanForPlayer(playerId)
     if banned then
-        local notice = string.format("[SpamBanGuard] %s was banned for spam (%s)", tostring(player_name), tostring(trigger))
+        local notice = string.format("[SpamBanGuard] %s was banned for spam (%s)", tostring(playerName), tostring(trigger))
         print(notice)
         MP.SendChatMessage(-1, notice)
     end
 
-    MP.DropPlayer(player_id, CONFIG.BAN_REASON)
+    MP.DropPlayer(playerId, config.banReason)
     return 1
 end
 
-function on_chat_message(player_id, player_name, message)
+---@param playerId integer
+---@param playerName string
+---@param message string
+---@return integer
+function onChatMessage(playerId, playerName, message)
     local t = now()
-    local pstate = ensure_player_chat_state(player_id)
+    local playerState = ensurePlayerChatState(playerId)
 
-    pstate.timestamps[#pstate.timestamps + 1] = t
-    prune_old_timestamps(pstate.timestamps, t - CONFIG.WINDOW_SECONDS)
+    playerState.timestamps[#playerState.timestamps + 1] = t
+    pruneOldTimestamps(playerState.timestamps, t - config.windowSeconds)
 
-    if #pstate.timestamps >= CONFIG.MAX_MESSAGES_IN_WINDOW then
-        return handle_spam_ban(player_id, player_name, "rate")
+    if #playerState.timestamps >= config.maxMessagesInWindow then
+        return handleSpamBan(playerId, playerName, "rate")
     end
 
-    local normalized = normalize_message(message)
-    local repeat_times = pstate.repeats[normalized] or {}
-    repeat_times[#repeat_times + 1] = t
-    prune_old_timestamps(repeat_times, t - CONFIG.REPEAT_WINDOW_SECONDS)
+    local normalizedMessage = normalizeMessage(message)
+    local repeatTimes = playerState.repeats[normalizedMessage] or {}
+    repeatTimes[#repeatTimes + 1] = t
+    pruneOldTimestamps(repeatTimes, t - config.repeatWindowSeconds)
 
-    if #repeat_times == 0 then
-        pstate.repeats[normalized] = nil
+    if #repeatTimes == 0 then
+        playerState.repeats[normalizedMessage] = nil
     else
-        pstate.repeats[normalized] = repeat_times
-        if #repeat_times >= CONFIG.MAX_REPEAT_COUNT then
-            return handle_spam_ban(player_id, player_name, "repeated message")
+        playerState.repeats[normalizedMessage] = repeatTimes
+        if #repeatTimes >= config.maxRepeatCount then
+            return handleSpamBan(playerId, playerName, "repeated message")
         end
     end
 
     return 0
 end
 
-function on_player_auth(player_name, player_role, is_guest, identifiers)
-    if is_banned_identifiers(identifiers) then
-        print("[SpamBanGuard] Blocked banned player during auth: " .. tostring(player_name))
-        return CONFIG.BAN_REASON
+---@param playerName string
+---@param playerRole string
+---@param isGuest boolean
+---@param identifiers table|nil
+---@return integer|string
+function onPlayerAuth(playerName, playerRole, isGuest, identifiers)
+    -- Kept for BeamMP callback signature compatibility.
+    local _ = playerRole
+    _ = isGuest
+
+    if isBannedIdentifiers(identifiers) then
+        print("[SpamBanGuard] Blocked banned player during auth: " .. tostring(playerName))
+        return config.banReason
     end
     return 0
 end
 
-function on_player_disconnect(player_id)
-    state.chat[player_id] = nil
+---@param playerId integer
+function onPlayerDisconnect(playerId)
+    state.chat[playerId] = nil
 end
 
-function on_init()
-    load_bans()
+function onInit()
+    loadBans()
     print("[SpamBanGuard] Ready")
 end
 
-MP.RegisterEvent("onInit", "on_init")
-MP.RegisterEvent("onPlayerAuth", "on_player_auth")
-MP.RegisterEvent("onChatMessage", "on_chat_message")
-MP.RegisterEvent("onPlayerDisconnect", "on_player_disconnect")
+MP.RegisterEvent("onInit", "onInit")
+MP.RegisterEvent("onPlayerAuth", "onPlayerAuth")
+MP.RegisterEvent("onChatMessage", "onChatMessage")
+MP.RegisterEvent("onPlayerDisconnect", "onPlayerDisconnect")
