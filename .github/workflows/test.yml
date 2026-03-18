@@ -1,0 +1,27 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lua-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Lua 5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+
+      - name: Lua Syntax Check
+        run: |
+          for file in $(find Server/SpamBanGuard -type f -name '*.lua' | sort); do
+            luac5.4 -p "$file"
+          done
+
+      - name: Run Lua Tests
+        run: lua5.4 Server/SpamBanGuard/tests/run.lua

@@ -1,5 +1,7 @@
 # SpamBanGuard (BeamMP Server Plugin)
 
+[![Test](https://github.com/acm-gaming/beamng-spam-ban-guard/actions/workflows/test.yml/badge.svg)](https://github.com/acm-gaming/beamng-spam-ban-guard/actions/workflows/test.yml)
+
 Auto-detects chat spam, bans the player, and saves their identifier so they stay blocked after server restart.
 
 ## What it does
@@ -7,8 +9,10 @@ Auto-detects chat spam, bans the player, and saves their identifier so they stay
 - Watches `onChatMessage` for:
   - Message rate spam (too many messages in short time)
   - Repeated message spam (same message repeated)
+  - Numeric burst spam patterns
+- Explicitly allows strict numeric descending countdowns (`10`, `9`, `8`, ...) in quick succession
 - Bans offender by persistent identifier (prefers BeamMP ID, falls back to IP)
-- Saves bans to `banned_ids.txt`
+- Saves bans to `bans.ndjson` (with automatic one-time legacy import from `banned_ids.txt`)
 - Blocks banned users at `onPlayerAuth` before they join
 
 ## Example
@@ -43,17 +47,41 @@ Auto-detects chat spam, bans the player, and saves their identifier so they stay
 
 ## Config
 
-Edit `CONFIG` at the top of `main.lua`:
+Edit `Server/SpamBanGuard/config.lua`:
 
-- `MAX_MESSAGES_IN_WINDOW` + `WINDOW_SECONDS`
-- `MAX_REPEAT_COUNT` + `REPEAT_WINDOW_SECONDS`
-- `BAN_REASON`
+- `rate.windowSeconds`, `rate.moderateThreshold`, `rate.severeThreshold`
+- `repeatSpam.windowSeconds`, `repeatSpam.moderateThreshold`, `repeatSpam.severeThreshold`
+- `countdown.maxStepGapSeconds`, `countdown.minSequenceLength`
+- `countdown.burstWindowSeconds`, `countdown.suspicious*Threshold`
+- `policy.cooccurrenceWindowSeconds`
+- `persistence.banStoreFile`, `persistence.legacyBanFile`
+- `banReason`
 
 ## Persistent ban file
 
-`banned_ids.txt` is created in the plugin folder on first ban.
+`bans.ndjson` is created in the plugin folder on first ban.
 
-Format is one key per line:
+Each line is a JSON object:
 
-- `beammp:1234567`
-- `ip:1.2.3.4`
+```json
+{"key":"beammp:1234567","reason":"Banned: chat spam detected","trigger":"cooccurrence:rate+repeatSpam","timestamp":1762841234}
+```
+
+Legacy `banned_ids.txt` is imported automatically if `bans.ndjson` does not exist yet.
+
+## Module layout
+
+- `main.lua`: BeamMP callback adapter and event registration
+- `core/engine.lua`: orchestration and ban policy
+- `detectors/*.lua`: rate / repeat / countdown detectors
+- `persistence/ban_store.lua`: deduplicated NDJSON persistence and legacy import
+
+## Tests
+
+Run local tests:
+
+```bash
+lua Server/SpamBanGuard/tests/run.lua
+```
+
+CI runs `.github/workflows/test.yml` on every push and pull request.
