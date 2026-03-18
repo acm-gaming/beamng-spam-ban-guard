@@ -56,6 +56,17 @@ local function readLines(path)
     return lines
 end
 
+---@param path string
+---@return boolean
+local function fileExists(path)
+    local file = io.open(path, "r")
+    if not file then
+        return false
+    end
+    file:close()
+    return true
+end
+
 ---@param prefix string
 ---@param ext string
 ---@return string
@@ -159,6 +170,32 @@ local function withHarness(options, fn)
     local h = newHarness(options)
     local ok, err = pcall(fn, h)
     h.cleanup()
+    if not ok then
+        error(err, 0)
+    end
+end
+
+---@param configJsonContent string
+---@param fn fun()
+local function withTemporaryConfigJson(configJsonContent, fn)
+    local configPath = PLUGIN_DIR .. "/config.json"
+    local backupPath = configPath .. ".test_backup_" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+    local hadBackup = false
+
+    if fileExists(configPath) then
+        assertTrue(os.rename(configPath, backupPath), "failed to backup existing config.json")
+        hadBackup = true
+    end
+
+    writeFile(configPath, configJsonContent)
+
+    local ok, err = pcall(fn)
+
+    os.remove(configPath)
+    if hadBackup then
+        assertTrue(os.rename(backupPath, configPath), "failed to restore original config.json")
+    end
+
     if not ok then
         error(err, 0)
     end
@@ -407,6 +444,36 @@ test("ban store deduplicates repeated key adds", function()
 
     os.remove(storePath)
     os.remove(legacyPath)
+end)
+
+test("config.json values are merged with defaults", function()
+    withTemporaryConfigJson("{\"rate\":{\"windowSeconds\":99},\"logging\":{\"level\":\"debug\"}}", function()
+        local originalUtil = _G.Util
+        _G.Util = {
+            JsonDecode = function(raw)
+                if raw == "{\"rate\":{\"windowSeconds\":99},\"logging\":{\"level\":\"debug\"}}" then
+                    return {
+                        rate = { windowSeconds = 99 },
+                        logging = { level = "debug" },
+                    }
+                end
+                error("unexpected JSON test payload")
+            end,
+        }
+
+        local ok, err = pcall(function()
+            local loadedConfig = assert(loadfile(PLUGIN_DIR .. "/config.lua"))()
+            assertEqual(loadedConfig.rate.windowSeconds, 99, "custom rate window should be used")
+            assertEqual(loadedConfig.rate.severeThreshold, 10, "missing nested rate option should default")
+            assertEqual(loadedConfig.repeatSpam.severeThreshold, 3, "missing repeat section should default")
+            assertEqual(loadedConfig.logging.level, "debug", "custom logging level should be used")
+        end)
+
+        _G.Util = originalUtil
+        if not ok then
+            error(err, 0)
+        end
+    end)
 end)
 
 local passed = 0

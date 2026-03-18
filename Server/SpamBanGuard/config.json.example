@@ -1,0 +1,32 @@
+{
+  "banReason": "Banned: chat spam detected",
+  "rate": {
+    "windowSeconds": 10,
+    "moderateThreshold": 6,
+    "severeThreshold": 10
+  },
+  "repeatSpam": {
+    "windowSeconds": 20,
+    "moderateThreshold": 2,
+    "severeThreshold": 3,
+    "staleTtlSeconds": 60,
+    "gcIntervalMessages": 24
+  },
+  "countdown": {
+    "maxStepGapSeconds": 3,
+    "minSequenceLength": 2,
+    "burstWindowSeconds": 10,
+    "suspiciousModerateThreshold": 8,
+    "suspiciousSevereThreshold": 12
+  },
+  "policy": {
+    "cooccurrenceWindowSeconds": 12
+  },
+  "persistence": {
+    "banStoreFile": "bans.ndjson",
+    "legacyBanFile": "banned_ids.txt"
+  },
+  "logging": {
+    "level": "info"
+  }
+}

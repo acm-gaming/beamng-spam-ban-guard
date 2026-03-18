@@ -47,7 +47,11 @@ Auto-detects chat spam, bans the player, and saves their identifier so they stay
 
 ## Config
 
-Edit `Server/SpamBanGuard/config.lua`:
+Create `Server/SpamBanGuard/config.json` (copy from `Server/SpamBanGuard/config.json.example`).
+
+If `config.json` is missing, the plugin logs that it was not found and uses built-in defaults.
+
+If `config.json` is partial, missing fields are merged from defaults automatically.
 
 - `rate.windowSeconds`, `rate.moderateThreshold`, `rate.severeThreshold`
 - `repeatSpam.windowSeconds`, `repeatSpam.moderateThreshold`, `repeatSpam.severeThreshold`

@@ -7,7 +7,9 @@ This repository contains a BeamMP server plugin that detects chat spam, bans off
 ## Current Module Layout
 
 - `Server/SpamBanGuard/main.lua`: BeamMP event adapter (`onInit`, `onPlayerAuth`, `onChatMessage`, `onPlayerDisconnect`)
-- `Server/SpamBanGuard/config.lua`: all tunable policy/config values
+- `Server/SpamBanGuard/config.lua`: default values + JSON loader + deep-merge logic
+- `Server/SpamBanGuard/config.json`: runtime overrides (optional, loaded if present)
+- `Server/SpamBanGuard/config.json.example`: default config example to copy/customize
 - `Server/SpamBanGuard/core/engine.lua`: orchestration and ban decision policy
 - `Server/SpamBanGuard/detectors/rate.lua`: rolling rate detector
 - `Server/SpamBanGuard/detectors/repeat.lua`: normalized repeated-message detector
@@ -20,6 +22,8 @@ This repository contains a BeamMP server plugin that detects chat spam, bans off
 - Strict numeric descending countdowns (`10`, `9`, `8`, ...) within the configured step gap must be exempt from rate/repeat spam counting.
 - Non-numeric countdown-like messages (for example `10...`) are not exempt.
 - Existing ban-key priority remains: `beammp` identifier first, then `ip` fallback.
+- If `config.json` is missing, log and use defaults.
+- If `config.json` is partial, merge missing options from defaults.
 
 ## Testing Requirements
 
